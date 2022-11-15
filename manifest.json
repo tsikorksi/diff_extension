@@ -4,8 +4,9 @@
   "description": "prevent tabnabbing",
   "manifest_version": 3,
   "author": "Tadeusz Sikorski",
-  "action":{
-    "default_popup": "index.html",
-    "default_title": "Latest Covid Report"
-  }
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {}
 }

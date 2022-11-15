@@ -7,19 +7,19 @@
 <body>
 <script src="resemble.js"></script>
 <script src="html2canvas.js"></script>
+
 <script>
-    function capture() {
-        html2canvas(document.body).then((canvas) => {
-            let a = document.createElement("a");
-            a.download = "ss.png";
-            a.href = canvas.toDataURL("image/png");
-            a.click();
-            console.log("screenshot made");
-        });
-    }
+
+</script>
+<script>
+
 </script>
 
-<button onclick="capture()">test</button>
+<button onclick="capture('base')">base</button>
+<button onclick="capture('test')">test</button>
+<button onclick="getDiff('localhost_bb.png', 'localhost_test.png')">base</button>
+
+
 
 </body>
 </html>
