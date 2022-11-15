@@ -8,5 +8,6 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "action": {}
+  "action": {},
+  "permissions": ["tabs"]
 }
