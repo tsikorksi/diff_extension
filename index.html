@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>diff_checker</title>
+</head>
+<body>
+<script src="resemble.js"></script>
+<script src="html2canvas.js"></script>
+<script>
+    function capture() {
+        html2canvas(document.body).then((canvas) => {
+            let a = document.createElement("a");
+            a.download = "ss.png";
+            a.href = canvas.toDataURL("image/png");
+            a.click();
+            console.log("screenshot made");
+        });
+    }
+</script>
+
+<button onclick="capture()">test</button>
+
+</body>
+</html>

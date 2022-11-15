@@ -1,0 +1,11 @@
+{
+  "name": "Diff Checker",
+  "version": "1.0.0",
+  "description": "prevent tabnabbing",
+  "manifest_version": 3,
+  "author": "Tadeusz Sikorski",
+  "action":{
+    "default_popup": "index.html",
+    "default_title": "Latest Covid Report"
+  }
+}
