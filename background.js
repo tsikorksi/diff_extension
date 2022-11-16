@@ -1,15 +1,22 @@
 // Globals to avoid excessive async
 let urls = new Map();
 let urlID = ''
+import resemble from "./resemble"
 
+/**
+ * Create an initial tab and then a timer
+ */
 chrome.runtime.onInstalled.addListener(async () => {
-    let url = chrome.runtime.getURL("index.html");
-    let tab = await chrome.tabs.create({ url });
-    console.log(`Created tab ${tab.id}`);
     chrome.alarms.create({ delayInMinutes: 1 });
 });
 
-chrome.alarms.onAlarm.addListener(timer);
+/**
+ * take screenshot and then start a new timer
+ */
+chrome.alarms.onAlarm.addListener( ()=>{
+    timer();
+    chrome.alarms.create({ delayInMinutes: 1 });
+});
 
 chrome.tabs.onActivated.addListener (timer);
 
@@ -48,12 +55,16 @@ function getTab() {
 }
 
 /**
- * when screenshot has been made, save it to map
+ * when screenshot has been made, save it to map, or if exists compare
  * @param imageUri the image data
  */
 function onCaptured(imageUri) {
     getTab()
-    urls.set(urlID, imageUri);
+    if (urls.has(urlID)) {
+        comp(urls.get(urlID), imageUri).then()
+    } else {
+        urls.set(urlID, imageUri);
+    }
 }
 
 
@@ -68,4 +79,15 @@ function onError(error) {
     else {
         console.log(`Error: ${error}`);
     }
+}
+
+async function comp(image1, image2) {
+
+
+    let url = chrome.runtime.getURL("compare.html");
+    let tab = await chrome.tabs.create({url});
+    resemble.outputSettings({ useCrossOrigin: false , outputDiff: true});
+    const diff = resemble(image1).compareTo(image2);
+    console.log(diff);
+    // add image to tab
 }
