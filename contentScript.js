@@ -20,3 +20,5 @@ function getDiff(image1, image2) {
     });
     // return data.getBuffer()
 }
+
+console.log("Loaded Tab");

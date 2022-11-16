@@ -9,5 +9,16 @@
     "type": "module"
   },
   "action": {},
-  "permissions": ["tabs"]
+  "permissions": ["tabs", "activeTab", "alarms", "storage"],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["contentScript.js"]
+    }
+  ]
 }
