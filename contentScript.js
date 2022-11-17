@@ -1,5 +1,5 @@
 /*
-James Cryer / Huddle
+James Cryer / Huddle - Lightly Modified by Tadeusz Sikorski
 URL: https://github.com/Huddle/Resemble.js
 */
 
@@ -430,11 +430,9 @@ var resemble = function (fileData) {
             }
         }
 
-        if (hasEquivalentSibling < 2) {
-            return true;
-        }
+        return hasEquivalentSibling < 2;
 
-        return false;
+
     }
 
     function copyPixel(px, offset, pix) {
@@ -1034,10 +1032,13 @@ async function comp(image1, image2) {
     })
 }
 
+/**
+ * Listener, runs resemble and then returns the data if necessary
+ */
 chrome.runtime.onMessage.addListener(
     function(request, sender, sendResponse) {
         comp(request.image1, request.image2);
-        if (match > 20) {
+        if (match > 30) {
             console.log("Sending difference of " + match);
             sendResponse({diff: delta});
             return true;

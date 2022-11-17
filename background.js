@@ -17,7 +17,6 @@ chrome.alarms.onAlarm.addListener( ()=>{
     chrome.alarms.create({ delayInMinutes: 0.1 });
 });
 
- //chrome.tabs.onActivated.addListener (timer);
 
 /**
  * Run the screenshot function with a short delay for promise
@@ -32,15 +31,9 @@ function timer(){
  * screenshot and then log it
  */
 function insert() {
-    chrome.tabs.getCurrent ( (tab) => {
-        if (tab.url.startsWith("http") ) {
-            let cap = chrome.tabs.captureVisibleTab(
-            )
-            cap.then(onCaptured, onError);
-        }
-    });
-
-
+    let cap = chrome.tabs.captureVisibleTab(
+    )
+    cap.then(onCaptured, onError);
 }
 
 /**
@@ -51,8 +44,10 @@ function getTab() {
 
         // since only one tab should be active and in the current window at once
         // the return variable should only have one entry
-        if (tab.url.startsWith("http") ) {
+        if (!tabs[0].url.startsWith("chrome") ) {
             urlID = tabs[0].id;
+        } else {
+            urlID = 0
         }
     });
 }
@@ -91,6 +86,10 @@ function onError(error) {
     }
 }
 
+/**
+ * Change the button color
+ * @param color the color in RGB hex form
+ */
 function change_color(color) {
     const canvas = new OffscreenCanvas(16, 16);
     const context = canvas.getContext('2d');
@@ -101,6 +100,13 @@ function change_color(color) {
     chrome.action.setIcon({imageData: imageData}, () => { /* ... */ });
 }
 
+/**
+ * Read the response from the content script and create a warning page if necessary
+ * @param request The request data from chrome
+ * @param sender the sender data
+ * @param sendResponse Whether a response should be sent, no
+ * @returns {boolean} true to end connection always
+ */
 function read_response(request, sender, sendResponse) {
     let diff;
     try {

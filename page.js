@@ -4,6 +4,7 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         sharedData = new URLSearchParams(location.search).get('data');
     } catch (e) {}
+    // Account for data transmission
     sharedData = sharedData.replaceAll(" ", "+")
     document.getElementById('image').src = sharedData;
 
