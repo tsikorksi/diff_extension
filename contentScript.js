@@ -1,275 +1,1017 @@
-// PIXELMATCH
-let defaultOptions;
-if (typeof defaultOptions === 'undefined') {
-    defaultOptions = {
-        threshold: 0.1,         // matching threshold (0 to 1); smaller is more sensitive
-        includeAA: false,       // whether to skip anti-aliasing detection
-        alpha: 0.1,             // opacity of original image in diff output
-        aaColor: [255, 255, 0], // color of anti-aliased pixels in diff output
-        diffColor: [255, 0, 0], // color of different pixels in diff output
-        diffColorAlt: null,     // whether to detect dark on light differences between img1 and img2 and set an alternative color to differentiate between the two
-        diffMask: false         // draw the diff over a transparent background (a mask)
-    };
+/*
+James Cryer / Huddle
+URL: https://github.com/Huddle/Resemble.js
+*/
+
+var Img;
+var Canvas;
+var loadNodeCanvasImage;
+
+
+Img = Image;
+
+function createCanvas(width, height) {
+    var cnvs = document.createElement("canvas");
+    cnvs.width = width;
+    cnvs.height = height;
+    return cnvs;
 }
 
-function pixelmatch(img1, img2, output, width, height, options) {
-
-    if (!isPixelData(img1) || !isPixelData(img2) || (output && !isPixelData(output)))
-        throw new Error('Image data: Uint8Array, Uint8ClampedArray or Buffer expected.');
-
-    if (img1.length !== img2.length || (output && output.length !== img1.length))
-        throw new Error('Image sizes do not match.');
-
-    if (img1.length !== width * height * 4) throw new Error('Image data size does not match width/height.');
-
-    options = Object.assign({}, defaultOptions, options);
-
-    // check if images are identical
-    const len = width * height;
-    const a32 = new Uint32Array(img1.buffer, img1.byteOffset, len);
-    const b32 = new Uint32Array(img2.buffer, img2.byteOffset, len);
-    let identical = true;
-
-    for (let i = 0; i < len; i++) {
-        if (a32[i] !== b32[i]) { identical = false; break; }
-    }
-    if (identical) { // fast path if identical
-        if (output && !options.diffMask) {
-            for (let i = 0; i < len; i++) drawGrayPixel(img1, 4 * i, options.alpha, output);
-        }
-        return 0;
-    }
-
-    // maximum acceptable square distance between two colors;
-    // 35215 is the maximum possible value for the YIQ difference metric
-    const maxDelta = 35215 * options.threshold * options.threshold;
-    let diff = 0;
-
-    // compare each pixel of one image against the other one
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-
-            const pos = (y * width + x) * 4;
-
-            // squared YUV distance between colors at this pixel position, negative if the img2 pixel is darker
-            const delta = colorDelta(img1, img2, pos, pos);
-
-            // the color difference is above the threshold
-            if (Math.abs(delta) > maxDelta) {
-                // check it's a real rendering difference or just anti-aliasing
-                if (!options.includeAA && (antialiased(img1, x, y, width, height, img2) ||
-                    antialiased(img2, x, y, width, height, img1))) {
-                    // one of the pixels is anti-aliasing; draw as yellow and do not count as difference
-                    // note that we do not include such pixels in a mask
-                    if (output && !options.diffMask) drawPixel(output, pos, ...options.aaColor);
-
-                } else {
-                    // found substantial difference not caused by anti-aliasing; draw it as such
-                    if (output) {
-                        drawPixel(output, pos, ...(delta < 0 && options.diffColorAlt || options.diffColor));
-                    }
-                    diff++;
-                }
-
-            } else if (output) {
-                // pixels are similar; draw background as grayscale image blended with white
-                if (!options.diffMask) drawGrayPixel(img1, pos, options.alpha, output);
-            }
-        }
-    }
-
-    // return the number of different pixels
-    return diff;
-}
-
-function isPixelData(arr) {
-    // work around instanceof Uint8Array not working properly in some Jest environments
-    return ArrayBuffer.isView(arr) && arr.constructor.BYTES_PER_ELEMENT === 1;
-}
-
-// check if a pixel is likely a part of anti-aliasing;
-// based on "Anti-aliased Pixel and Intensity Slope Detector" paper by V. Vysniauskas, 2009
-
-function antialiased(img, x1, y1, width, height, img2) {
-    const x0 = Math.max(x1 - 1, 0);
-    const y0 = Math.max(y1 - 1, 0);
-    const x2 = Math.min(x1 + 1, width - 1);
-    const y2 = Math.min(y1 + 1, height - 1);
-    const pos = (y1 * width + x1) * 4;
-    let zeroes = x1 === x0 || x1 === x2 || y1 === y0 || y1 === y2 ? 1 : 0;
-    let min = 0;
-    let max = 0;
-    let minX, minY, maxX, maxY;
-
-    // go through 8 adjacent pixels
-    for (let x = x0; x <= x2; x++) {
-        for (let y = y0; y <= y2; y++) {
-            if (x === x1 && y === y1) continue;
-
-            // brightness delta between the center pixel and adjacent one
-            const delta = colorDelta(img, img, pos, (y * width + x) * 4, true);
-
-            // count the number of equal, darker and brighter adjacent pixels
-            if (delta === 0) {
-                zeroes++;
-                // if found more than 2 equal siblings, it's definitely not anti-aliasing
-                if (zeroes > 2) return false;
-
-                // remember the darkest pixel
-            } else if (delta < min) {
-                min = delta;
-                minX = x;
-                minY = y;
-
-                // remember the brightest pixel
-            } else if (delta > max) {
-                max = delta;
-                maxX = x;
-                maxY = y;
-            }
-        }
-    }
-
-    // if there are no both darker and brighter pixels among siblings, it's not anti-aliasing
-    if (min === 0 || max === 0) return false;
-
-    // if either the darkest or the brightest pixel has 3+ equal siblings in both images
-    // (definitely not anti-aliased), this pixel is anti-aliased
-    return (hasManySiblings(img, minX, minY, width, height) && hasManySiblings(img2, minX, minY, width, height)) ||
-        (hasManySiblings(img, maxX, maxY, width, height) && hasManySiblings(img2, maxX, maxY, width, height));
-}
-
-// check if a pixel has 3+ adjacent pixels of the same color.
-function hasManySiblings(img, x1, y1, width, height) {
-    const x0 = Math.max(x1 - 1, 0);
-    const y0 = Math.max(y1 - 1, 0);
-    const x2 = Math.min(x1 + 1, width - 1);
-    const y2 = Math.min(y1 + 1, height - 1);
-    const pos = (y1 * width + x1) * 4;
-    let zeroes = x1 === x0 || x1 === x2 || y1 === y0 || y1 === y2 ? 1 : 0;
-
-    // go through 8 adjacent pixels
-    for (let x = x0; x <= x2; x++) {
-        for (let y = y0; y <= y2; y++) {
-            if (x === x1 && y === y1) continue;
-
-            const pos2 = (y * width + x) * 4;
-            if (img[pos] === img[pos2] &&
-                img[pos + 1] === img[pos2 + 1] &&
-                img[pos + 2] === img[pos2 + 2] &&
-                img[pos + 3] === img[pos2 + 3]) zeroes++;
-
-            if (zeroes > 2) return true;
-        }
-    }
-
+function isNode() {
     return false;
 }
 
-// calculate color difference according to the paper "Measuring perceived color difference
-// using YIQ NTSC transmission color space in mobile applications" by Y. Kotsarenko and F. Ramos
+var oldGlobalSettings = {};
+var globalOutputSettings = oldGlobalSettings;
 
-function colorDelta(img1, img2, k, m, yOnly) {
-    let r1 = img1[k + 0];
-    let g1 = img1[k + 1];
-    let b1 = img1[k + 2];
-    let a1 = img1[k + 3];
+var resemble = function (fileData) {
+    var pixelTransparency = 1;
 
-    let r2 = img2[m + 0];
-    let g2 = img2[m + 1];
-    let b2 = img2[m + 2];
-    let a2 = img2[m + 3];
+    var errorPixelColor = {
+        // Color for Error Pixels. Between 0 and 255.
+        red: 255,
+        green: 0,
+        blue: 255,
+        alpha: 255
+    };
 
-    if (a1 === a2 && r1 === r2 && g1 === g2 && b1 === b2) return 0;
+    var targetPix = { r: 0, g: 0, b: 0, a: 0 }; // isAntialiased
 
-    if (a1 < 255) {
-        a1 /= 255;
-        r1 = blend(r1, a1);
-        g1 = blend(g1, a1);
-        b1 = blend(b1, a1);
+    var errorPixelTransform = {
+        flat: function (px, offset) {
+            px[offset] = errorPixelColor.red;
+            px[offset + 1] = errorPixelColor.green;
+            px[offset + 2] = errorPixelColor.blue;
+            px[offset + 3] = errorPixelColor.alpha;
+        },
+        movement: function (px, offset, d1, d2) {
+            px[offset] = (d2.r * (errorPixelColor.red / 255) + errorPixelColor.red) / 2;
+            px[offset + 1] = (d2.g * (errorPixelColor.green / 255) + errorPixelColor.green) / 2;
+            px[offset + 2] = (d2.b * (errorPixelColor.blue / 255) + errorPixelColor.blue) / 2;
+            px[offset + 3] = d2.a;
+        },
+        flatDifferenceIntensity: function (px, offset, d1, d2) {
+            px[offset] = errorPixelColor.red;
+            px[offset + 1] = errorPixelColor.green;
+            px[offset + 2] = errorPixelColor.blue;
+            px[offset + 3] = colorsDistance(d1, d2);
+        },
+        movementDifferenceIntensity: function (px, offset, d1, d2) {
+            var ratio = (colorsDistance(d1, d2) / 255) * 0.8;
+
+            px[offset] = (1 - ratio) * (d2.r * (errorPixelColor.red / 255)) + ratio * errorPixelColor.red;
+            px[offset + 1] = (1 - ratio) * (d2.g * (errorPixelColor.green / 255)) + ratio * errorPixelColor.green;
+            px[offset + 2] = (1 - ratio) * (d2.b * (errorPixelColor.blue / 255)) + ratio * errorPixelColor.blue;
+            px[offset + 3] = d2.a;
+        },
+        diffOnly: function (px, offset, d1, d2) {
+            px[offset] = d2.r;
+            px[offset + 1] = d2.g;
+            px[offset + 2] = d2.b;
+            px[offset + 3] = d2.a;
+        }
+    };
+
+    var errorPixel = errorPixelTransform.flat;
+    var errorType;
+    var boundingBoxes;
+    var ignoredBoxes;
+    var ignoreAreasColoredWith;
+    var largeImageThreshold = 1200;
+    var useCrossOrigin = true;
+    var data = {};
+    var images = [];
+    var updateCallbackArray = [];
+
+    var tolerance = {
+        // between 0 and 255
+        red: 16,
+        green: 16,
+        blue: 16,
+        alpha: 16,
+        minBrightness: 16,
+        maxBrightness: 240
+    };
+
+    var ignoreAntialiasing = false;
+    var ignoreColors = false;
+    var scaleToSameSize = false;
+    var compareOnly = false;
+    var returnEarlyThreshold;
+
+    function colorsDistance(c1, c2) {
+        return (Math.abs(c1.r - c2.r) + Math.abs(c1.g - c2.g) + Math.abs(c1.b - c2.b)) / 3;
     }
 
-    if (a2 < 255) {
-        a2 /= 255;
-        r2 = blend(r2, a2);
-        g2 = blend(g2, a2);
-        b2 = blend(b2, a2);
+    function withinBoundingBox(x, y, width, height, box) {
+        return x > (box.left || 0) && x < (box.right || width) && y > (box.top || 0) && y < (box.bottom || height);
     }
 
-    const y1 = rgb2y(r1, g1, b1);
-    const y2 = rgb2y(r2, g2, b2);
-    const y = y1 - y2;
+    function withinComparedArea(x, y, width, height, pixel2) {
+        var isIncluded = true;
+        var i;
+        var boundingBox;
+        var ignoredBox;
+        var selected;
+        var ignored;
 
-    if (yOnly) return y; // brightness difference only
+        if (boundingBoxes instanceof Array) {
+            selected = false;
+            for (i = 0; i < boundingBoxes.length; i++) {
+                boundingBox = boundingBoxes[i];
+                if (withinBoundingBox(x, y, width, height, boundingBox)) {
+                    selected = true;
+                    break;
+                }
+            }
+        }
+        if (ignoredBoxes instanceof Array) {
+            ignored = true;
+            for (i = 0; i < ignoredBoxes.length; i++) {
+                ignoredBox = ignoredBoxes[i];
+                if (withinBoundingBox(x, y, width, height, ignoredBox)) {
+                    ignored = false;
+                    break;
+                }
+            }
+        }
 
-    const i = rgb2i(r1, g1, b1) - rgb2i(r2, g2, b2);
-    const q = rgb2q(r1, g1, b1) - rgb2q(r2, g2, b2);
+        if (ignoreAreasColoredWith) {
+            return colorsDistance(pixel2, ignoreAreasColoredWith) !== 0;
+        }
 
-    const delta = 0.5053 * y * y + 0.299 * i * i + 0.1957 * q * q;
-
-    // encode whether the pixel lightens or darkens in the sign
-    return y1 > y2 ? -delta : delta;
-}
-
-function rgb2y(r, g, b) { return r * 0.29889531 + g * 0.58662247 + b * 0.11448223; }
-function rgb2i(r, g, b) { return r * 0.59597799 - g * 0.27417610 - b * 0.32180189; }
-function rgb2q(r, g, b) { return r * 0.21147017 - g * 0.52261711 + b * 0.31114694; }
-
-// blend semi-transparent color with white
-function blend(c, a) {
-    return 255 + (c - 255) * a;
-}
-
-function drawPixel(output, pos, r, g, b) {
-    output[pos + 0] = r;
-    output[pos + 1] = g;
-    output[pos + 2] = b;
-    output[pos + 3] = 255;
-}
-
-function drawGrayPixel(img, i, alpha, output) {
-    const r = img[i + 0];
-    const g = img[i + 1];
-    const b = img[i + 2];
-    const val = blend(rgb2y(r, g, b), alpha * img[i + 3] / 255);
-    drawPixel(output, i, val, val, val);
-}
-
-chrome.runtime.onMessage.addListener(
-    function(request, sender, sendResponse) {
-        console.log("Calculating difference...");
-        let diff = comp(request.image1, request.image2);
-        sendResponse({diff: diff});
-
-    }
-);
-
-/**
- * Taken from https://github.com/component/data-uri-to-u8/blob/master/index.js
- * @param uri the dataURL
- * @returns {Uint8Array} usable by pixelmatch
- */
-function convert(uri){
-    var data = uri.split(',')[1];
-    var bytes = atob(data);
-    var buf = new ArrayBuffer(bytes.length);
-    var arr = new Uint8Array(buf);
-
-    for (var i = 0; i < bytes.length; i++) {
-        arr[i] = bytes.charCodeAt(i);
+        if (selected === undefined && ignored === undefined) {
+            return true;
+        }
+        if (selected === false && ignored === true) {
+            return false;
+        }
+        if (selected === true || ignored === true) {
+            isIncluded = true;
+        }
+        if (selected === false || ignored === false) {
+            isIncluded = false;
+        }
+        return isIncluded;
     }
 
-    arr.type = mime(uri);
-    return arr;
+    function triggerDataUpdate() {
+        var len = updateCallbackArray.length;
+        var i;
+        for (i = 0; i < len; i++) {
+            if (typeof updateCallbackArray[i] === "function") {
+                updateCallbackArray[i](data);
+            }
+        }
+    }
+
+    function loop(w, h, callback) {
+        var x;
+        var y;
+
+        for (x = 0; x < w; x++) {
+            for (y = 0; y < h; y++) {
+                callback(x, y);
+            }
+        }
+    }
+
+    function parseImage(sourceImageData, width, height) {
+        var pixelCount = 0;
+        var redTotal = 0;
+        var greenTotal = 0;
+        var blueTotal = 0;
+        var alphaTotal = 0;
+        var brightnessTotal = 0;
+        var whiteTotal = 0;
+        var blackTotal = 0;
+
+        loop(width, height, function (horizontalPos, verticalPos) {
+            var offset = (verticalPos * width + horizontalPos) * 4;
+            var red = sourceImageData[offset];
+            var green = sourceImageData[offset + 1];
+            var blue = sourceImageData[offset + 2];
+            var alpha = sourceImageData[offset + 3];
+            var brightness = getBrightness(red, green, blue);
+
+            if (red === green && red === blue && alpha) {
+                if (red === 0) {
+                    blackTotal++;
+                } else if (red === 255) {
+                    whiteTotal++;
+                }
+            }
+
+            pixelCount++;
+
+            redTotal += (red / 255) * 100;
+            greenTotal += (green / 255) * 100;
+            blueTotal += (blue / 255) * 100;
+            alphaTotal += ((255 - alpha) / 255) * 100;
+            brightnessTotal += (brightness / 255) * 100;
+        });
+
+        data.red = Math.floor(redTotal / pixelCount);
+        data.green = Math.floor(greenTotal / pixelCount);
+        data.blue = Math.floor(blueTotal / pixelCount);
+        data.alpha = Math.floor(alphaTotal / pixelCount);
+        data.brightness = Math.floor(brightnessTotal / pixelCount);
+        data.white = Math.floor((whiteTotal / pixelCount) * 100);
+        data.black = Math.floor((blackTotal / pixelCount) * 100);
+
+        triggerDataUpdate();
+    }
+
+    function onLoadImage(hiddenImage, callback) {
+        // don't assign to hiddenImage, see https://github.com/Huddle/Resemble.js/pull/87/commits/300d43352a2845aad289b254bfbdc7cd6a37e2d7
+        var width = hiddenImage.width;
+        var height = hiddenImage.height;
+
+        if (scaleToSameSize && images.length === 1) {
+            width = images[0].width;
+            height = images[0].height;
+        }
+
+        var hiddenCanvas = createCanvas(width, height);
+        var imageData;
+
+        hiddenCanvas.getContext("2d").drawImage(hiddenImage, 0, 0, width, height);
+        imageData = hiddenCanvas.getContext("2d").getImageData(0, 0, width, height);
+
+        images.push(imageData);
+
+        callback(imageData, width, height);
+    }
+
+    function loadImageData(fileDataForImage, callback) {
+        var fileReader;
+        var hiddenImage = new Img();
+
+        if (!hiddenImage.setAttribute) {
+            hiddenImage.setAttribute = function setAttribute() {};
+        }
+
+        if (useCrossOrigin) {
+            hiddenImage.setAttribute("crossorigin", "anonymous");
+        }
+
+        hiddenImage.onerror = function (event) {
+            hiddenImage.onload = null;
+            hiddenImage.onerror = null; // fixes pollution between calls
+            const error = event ? event + "" : "Unknown error";
+            images.push({ error: `Failed to load image '${fileDataForImage}'. ${error}` });
+            callback();
+        };
+
+        hiddenImage.onload = function () {
+            hiddenImage.onload = null; // fixes pollution between calls
+            hiddenImage.onerror = null;
+            onLoadImage(hiddenImage, callback);
+        };
+
+        if (typeof fileDataForImage === "string") {
+            hiddenImage.src = fileDataForImage;
+            if (!isNode() && hiddenImage.complete && hiddenImage.naturalWidth > 0) {
+                hiddenImage.onload();
+            }
+        } else if (
+            typeof fileDataForImage.data !== "undefined" &&
+            typeof fileDataForImage.width === "number" &&
+            typeof fileDataForImage.height === "number"
+        ) {
+            images.push(fileDataForImage);
+
+            callback(fileDataForImage, fileDataForImage.width, fileDataForImage.height);
+        } else if (typeof Buffer !== "undefined" && fileDataForImage instanceof Buffer) {
+            // If we have Buffer, assume we're on Node+Canvas and its supported
+            // hiddenImage.src = fileDataForImage;
+
+            loadNodeCanvasImage(fileDataForImage)
+                .then(function (image) {
+                    hiddenImage.onload = null; // fixes pollution between calls
+                    hiddenImage.onerror = null;
+                    onLoadImage(image, callback);
+                })
+                .catch(function (err) {
+                    images.push({
+                        error: err ? err + "" : "Image load error."
+                    });
+                    callback();
+                });
+        } else {
+            fileReader = new FileReader();
+            fileReader.onload = function (event) {
+                hiddenImage.src = event.target.result;
+            };
+            fileReader.readAsDataURL(fileDataForImage);
+        }
+    }
+
+    function isColorSimilar(a, b, color) {
+        var absDiff = Math.abs(a - b);
+
+        if (typeof a === "undefined") {
+            return false;
+        }
+        if (typeof b === "undefined") {
+            return false;
+        }
+
+        if (a === b) {
+            return true;
+        } else if (absDiff < tolerance[color]) {
+            return true;
+        }
+        return false;
+    }
+
+    function isPixelBrightnessSimilar(d1, d2) {
+        var alpha = isColorSimilar(d1.a, d2.a, "alpha");
+        var brightness = isColorSimilar(d1.brightness, d2.brightness, "minBrightness");
+        return brightness && alpha;
+    }
+
+    function getBrightness(r, g, b) {
+        return 0.3 * r + 0.59 * g + 0.11 * b;
+    }
+
+    function isRGBSame(d1, d2) {
+        var red = d1.r === d2.r;
+        var green = d1.g === d2.g;
+        var blue = d1.b === d2.b;
+        return red && green && blue;
+    }
+
+    function isRGBSimilar(d1, d2) {
+        var red = isColorSimilar(d1.r, d2.r, "red");
+        var green = isColorSimilar(d1.g, d2.g, "green");
+        var blue = isColorSimilar(d1.b, d2.b, "blue");
+        var alpha = isColorSimilar(d1.a, d2.a, "alpha");
+
+        return red && green && blue && alpha;
+    }
+
+    function isContrasting(d1, d2) {
+        return Math.abs(d1.brightness - d2.brightness) > tolerance.maxBrightness;
+    }
+
+    function getHue(red, green, blue) {
+        var r = red / 255;
+        var g = green / 255;
+        var b = blue / 255;
+        var max = Math.max(r, g, b);
+        var min = Math.min(r, g, b);
+        var h;
+        var d;
+
+        if (max === min) {
+            h = 0; // achromatic
+        } else {
+            d = max - min;
+            switch (max) {
+                case r:
+                    h = (g - b) / d + (g < b ? 6 : 0);
+                    break;
+                case g:
+                    h = (b - r) / d + 2;
+                    break;
+                case b:
+                    h = (r - g) / d + 4;
+                    break;
+                default:
+                    h /= 6;
+            }
+        }
+
+        return h;
+    }
+
+    function isAntialiased(sourcePix, pix, cacheSet, verticalPos, horizontalPos, width) {
+        var offset;
+        var distance = 1;
+        var i;
+        var j;
+        var hasHighContrastSibling = 0;
+        var hasSiblingWithDifferentHue = 0;
+        var hasEquivalentSibling = 0;
+
+        addHueInfo(sourcePix);
+
+        for (i = distance * -1; i <= distance; i++) {
+            for (j = distance * -1; j <= distance; j++) {
+                if (i === 0 && j === 0) {
+                    // ignore source pixel
+                } else {
+                    offset = ((verticalPos + j) * width + (horizontalPos + i)) * 4;
+
+                    if (!getPixelInfo(targetPix, pix, offset, cacheSet)) {
+                        continue;
+                    }
+
+                    addBrightnessInfo(targetPix);
+                    addHueInfo(targetPix);
+
+                    if (isContrasting(sourcePix, targetPix)) {
+                        hasHighContrastSibling++;
+                    }
+
+                    if (isRGBSame(sourcePix, targetPix)) {
+                        hasEquivalentSibling++;
+                    }
+
+                    if (Math.abs(targetPix.h - sourcePix.h) > 0.3) {
+                        hasSiblingWithDifferentHue++;
+                    }
+
+                    if (hasSiblingWithDifferentHue > 1 || hasHighContrastSibling > 1) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        if (hasEquivalentSibling < 2) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function copyPixel(px, offset, pix) {
+        if (errorType === "diffOnly") {
+            return;
+        }
+
+        px[offset] = pix.r; // r
+        px[offset + 1] = pix.g; // g
+        px[offset + 2] = pix.b; // b
+        px[offset + 3] = pix.a * pixelTransparency; // a
+    }
+
+    function copyGrayScalePixel(px, offset, pix) {
+        if (errorType === "diffOnly") {
+            return;
+        }
+
+        px[offset] = pix.brightness; // r
+        px[offset + 1] = pix.brightness; // g
+        px[offset + 2] = pix.brightness; // b
+        px[offset + 3] = pix.a * pixelTransparency; // a
+    }
+
+    function getPixelInfo(dst, pix, offset) {
+        if (pix.length > offset) {
+            dst.r = pix[offset];
+            dst.g = pix[offset + 1];
+            dst.b = pix[offset + 2];
+            dst.a = pix[offset + 3];
+
+            return true;
+        }
+
+        return false;
+    }
+
+    function addBrightnessInfo(pix) {
+        pix.brightness = getBrightness(pix.r, pix.g, pix.b); // 'corrected' lightness
+    }
+
+    function addHueInfo(pix) {
+        pix.h = getHue(pix.r, pix.g, pix.b);
+    }
+
+    function analyseImages(img1, img2, width, height) {
+        var data1 = img1.data;
+        var data2 = img2.data;
+        var hiddenCanvas;
+        var context;
+        var imgd;
+        var pix;
+
+        if (!compareOnly) {
+            hiddenCanvas = createCanvas(width, height);
+
+            context = hiddenCanvas.getContext("2d");
+            imgd = context.createImageData(width, height);
+            pix = imgd.data;
+        }
+
+        var mismatchCount = 0;
+        var diffBounds = {
+            top: height,
+            left: width,
+            bottom: 0,
+            right: 0
+        };
+        var updateBounds = function (x, y) {
+            diffBounds.left = Math.min(x, diffBounds.left);
+            diffBounds.right = Math.max(x, diffBounds.right);
+            diffBounds.top = Math.min(y, diffBounds.top);
+            diffBounds.bottom = Math.max(y, diffBounds.bottom);
+        };
+
+        var time = Date.now();
+
+        var skip;
+
+        if (!!largeImageThreshold && ignoreAntialiasing && (width > largeImageThreshold || height > largeImageThreshold)) {
+            skip = 6;
+        }
+
+        var pixel1 = { r: 0, g: 0, b: 0, a: 0 };
+        var pixel2 = { r: 0, g: 0, b: 0, a: 0 };
+
+        var skipTheRest = false;
+
+        loop(width, height, function (horizontalPos, verticalPos) {
+            if (skipTheRest) {
+                return;
+            }
+
+            if (skip) {
+                // only skip if the image isn't small
+                if (verticalPos % skip === 0 || horizontalPos % skip === 0) {
+                    return;
+                }
+            }
+
+            var offset = (verticalPos * width + horizontalPos) * 4;
+            if (!getPixelInfo(pixel1, data1, offset, 1) || !getPixelInfo(pixel2, data2, offset, 2)) {
+                return;
+            }
+
+            var isWithinComparedArea = withinComparedArea(horizontalPos, verticalPos, width, height, pixel2);
+
+            if (ignoreColors) {
+                addBrightnessInfo(pixel1);
+                addBrightnessInfo(pixel2);
+
+                if (isPixelBrightnessSimilar(pixel1, pixel2) || !isWithinComparedArea) {
+                    if (!compareOnly) {
+                        copyGrayScalePixel(pix, offset, pixel2);
+                    }
+                } else {
+                    if (!compareOnly) {
+                        errorPixel(pix, offset, pixel1, pixel2);
+                    }
+
+                    mismatchCount++;
+                    updateBounds(horizontalPos, verticalPos);
+                }
+                return;
+            }
+
+            if (isRGBSimilar(pixel1, pixel2) || !isWithinComparedArea) {
+                if (!compareOnly) {
+                    copyPixel(pix, offset, pixel1);
+                }
+            } else if (
+                ignoreAntialiasing &&
+                (addBrightnessInfo(pixel1), // jit pixel info augmentation looks a little weird, sorry.
+                    addBrightnessInfo(pixel2),
+                isAntialiased(pixel1, data1, 1, verticalPos, horizontalPos, width) || isAntialiased(pixel2, data2, 2, verticalPos, horizontalPos, width))
+            ) {
+                if (isPixelBrightnessSimilar(pixel1, pixel2) || !isWithinComparedArea) {
+                    if (!compareOnly) {
+                        copyGrayScalePixel(pix, offset, pixel2);
+                    }
+                } else {
+                    if (!compareOnly) {
+                        errorPixel(pix, offset, pixel1, pixel2);
+                    }
+
+                    mismatchCount++;
+                    updateBounds(horizontalPos, verticalPos);
+                }
+            } else {
+                if (!compareOnly) {
+                    errorPixel(pix, offset, pixel1, pixel2);
+                }
+
+                mismatchCount++;
+                updateBounds(horizontalPos, verticalPos);
+            }
+
+            if (compareOnly) {
+                var currentMisMatchPercent = (mismatchCount / (height * width)) * 100;
+
+                if (currentMisMatchPercent > returnEarlyThreshold) {
+                    skipTheRest = true;
+                }
+            }
+        });
+
+        data.rawMisMatchPercentage = (mismatchCount / (height * width)) * 100;
+        data.misMatchPercentage = data.rawMisMatchPercentage.toFixed(2);
+        data.diffBounds = diffBounds;
+        data.analysisTime = Date.now() - time;
+
+        data.getImageDataUrl = function (text) {
+            if (compareOnly) {
+                throw Error("No diff image available - ran in compareOnly mode");
+            }
+
+            var barHeight = 0;
+
+            if (text) {
+                barHeight = addLabel(text, context, hiddenCanvas);
+            }
+
+            context.putImageData(imgd, 0, barHeight);
+
+            return hiddenCanvas.toDataURL("image/png");
+        };
+
+        if (!compareOnly && hiddenCanvas.toBuffer) {
+            data.getBuffer = function (includeOriginal) {
+                if (includeOriginal) {
+                    var imageWidth = hiddenCanvas.width + 2;
+                    hiddenCanvas.width = imageWidth * 3;
+                    context.putImageData(img1, 0, 0);
+                    context.putImageData(img2, imageWidth, 0);
+                    context.putImageData(imgd, imageWidth * 2, 0);
+                } else {
+                    context.putImageData(imgd, 0, 0);
+                }
+                return hiddenCanvas.toBuffer();
+            };
+        }
+    }
+
+    function addLabel(text, context, hiddenCanvas) {
+        var textPadding = 2;
+
+        context.font = "12px sans-serif";
+
+        var textWidth = context.measureText(text).width + textPadding * 2;
+        var barHeight = 22;
+
+        if (textWidth > hiddenCanvas.width) {
+            hiddenCanvas.width = textWidth;
+        }
+
+        hiddenCanvas.height += barHeight;
+
+        context.fillStyle = "#666";
+        context.fillRect(0, 0, hiddenCanvas.width, barHeight - 4);
+        context.fillStyle = "#fff";
+        context.fillRect(0, barHeight - 4, hiddenCanvas.width, 4);
+
+        context.fillStyle = "#fff";
+        context.textBaseline = "top";
+        context.font = "12px sans-serif";
+        context.fillText(text, textPadding, 1);
+
+        return barHeight;
+    }
+
+    function normalise(img, w, h) {
+        var c;
+        var context;
+
+        if (img.height < h || img.width < w) {
+            c = createCanvas(w, h);
+            context = c.getContext("2d");
+            context.putImageData(img, 0, 0);
+            return context.getImageData(0, 0, w, h);
+        }
+
+        return img;
+    }
+
+    function outputSettings(options) {
+        var key;
+
+        if (options.errorColor) {
+            for (key in options.errorColor) {
+                if (options.errorColor.hasOwnProperty(key)) {
+                    errorPixelColor[key] = options.errorColor[key] === void 0 ? errorPixelColor[key] : options.errorColor[key];
+                }
+            }
+        }
+
+        if (options.errorType && errorPixelTransform[options.errorType]) {
+            errorPixel = errorPixelTransform[options.errorType];
+            errorType = options.errorType;
+        }
+
+        if (options.errorPixel && typeof options.errorPixel === "function") {
+            errorPixel = options.errorPixel;
+        }
+
+        pixelTransparency = isNaN(Number(options.transparency)) ? pixelTransparency : options.transparency;
+
+        if (options.largeImageThreshold !== undefined) {
+            largeImageThreshold = options.largeImageThreshold;
+        }
+
+        if (options.useCrossOrigin !== undefined) {
+            useCrossOrigin = options.useCrossOrigin;
+        }
+
+        if (options.boundingBox !== undefined) {
+            boundingBoxes = [options.boundingBox];
+        }
+
+        if (options.ignoredBox !== undefined) {
+            ignoredBoxes = [options.ignoredBox];
+        }
+
+        if (options.boundingBoxes !== undefined) {
+            boundingBoxes = options.boundingBoxes;
+        }
+
+        if (options.ignoredBoxes !== undefined) {
+            ignoredBoxes = options.ignoredBoxes;
+        }
+
+        if (options.ignoreAreasColoredWith !== undefined) {
+            ignoreAreasColoredWith = options.ignoreAreasColoredWith;
+        }
+    }
+
+    function compare(one, two) {
+        if (globalOutputSettings !== oldGlobalSettings) {
+            outputSettings(globalOutputSettings);
+        }
+
+        function onceWeHaveBoth() {
+            var width;
+            var height;
+            if (images.length === 2) {
+                if (images[0].error || images[1].error) {
+                    data = {};
+                    data.error = images[0].error ? images[0].error : images[1].error;
+                    triggerDataUpdate();
+                    return;
+                }
+                width = images[0].width > images[1].width ? images[0].width : images[1].width;
+                height = images[0].height > images[1].height ? images[0].height : images[1].height;
+
+                if (images[0].width === images[1].width && images[0].height === images[1].height) {
+                    data.isSameDimensions = true;
+                } else {
+                    data.isSameDimensions = false;
+                }
+
+                data.dimensionDifference = {
+                    width: images[0].width - images[1].width,
+                    height: images[0].height - images[1].height
+                };
+
+                analyseImages(normalise(images[0], width, height), normalise(images[1], width, height), width, height);
+
+                triggerDataUpdate();
+            }
+        }
+
+        images = [];
+        loadImageData(one, onceWeHaveBoth);
+        loadImageData(two, onceWeHaveBoth);
+    }
+
+    function getCompareApi(param) {
+        var secondFileData;
+        var hasMethod = typeof param === "function";
+
+        if (!hasMethod) {
+            // assume it's file data
+            secondFileData = param;
+        }
+
+        var self = {
+            setReturnEarlyThreshold: function (threshold) {
+                if (threshold) {
+                    compareOnly = true;
+                    returnEarlyThreshold = threshold;
+                }
+                return self;
+            },
+            scaleToSameSize: function () {
+                scaleToSameSize = true;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            useOriginalSize: function () {
+                scaleToSameSize = false;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            ignoreNothing: function () {
+                tolerance.red = 0;
+                tolerance.green = 0;
+                tolerance.blue = 0;
+                tolerance.alpha = 0;
+                tolerance.minBrightness = 0;
+                tolerance.maxBrightness = 255;
+
+                ignoreAntialiasing = false;
+                ignoreColors = false;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            ignoreLess: function () {
+                tolerance.red = 16;
+                tolerance.green = 16;
+                tolerance.blue = 16;
+                tolerance.alpha = 16;
+                tolerance.minBrightness = 16;
+                tolerance.maxBrightness = 240;
+
+                ignoreAntialiasing = false;
+                ignoreColors = false;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            ignoreAntialiasing: function () {
+                tolerance.red = 32;
+                tolerance.green = 32;
+                tolerance.blue = 32;
+                tolerance.alpha = 32;
+                tolerance.minBrightness = 64;
+                tolerance.maxBrightness = 96;
+
+                ignoreAntialiasing = true;
+                ignoreColors = false;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            ignoreColors: function () {
+                tolerance.alpha = 16;
+                tolerance.minBrightness = 16;
+                tolerance.maxBrightness = 240;
+
+                ignoreAntialiasing = false;
+                ignoreColors = true;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            ignoreAlpha: function () {
+                tolerance.red = 16;
+                tolerance.green = 16;
+                tolerance.blue = 16;
+                tolerance.alpha = 255;
+                tolerance.minBrightness = 16;
+                tolerance.maxBrightness = 240;
+
+                ignoreAntialiasing = false;
+                ignoreColors = false;
+
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            repaint: function () {
+                if (hasMethod) {
+                    param();
+                }
+                return self;
+            },
+            outputSettings: function (options) {
+                outputSettings(options);
+                return self;
+            },
+            onComplete: function (callback) {
+                updateCallbackArray.push(callback);
+
+                var wrapper = function () {
+                    compare(fileData, secondFileData);
+                };
+
+                wrapper();
+
+                return getCompareApi(wrapper);
+            },
+            setupCustomTolerance: function (customSettings) {
+                for (var property in tolerance) {
+                    if (!customSettings.hasOwnProperty(property)) {
+                        continue;
+                    }
+
+                    tolerance[property] = customSettings[property];
+                }
+            }
+        };
+
+        return self;
+    }
+
+    var rootSelf = {
+        onComplete: function (callback) {
+            updateCallbackArray.push(callback);
+            loadImageData(fileData, function (imageData, width, height) {
+                parseImage(imageData.data, width, height);
+            });
+        },
+        compareTo: function (secondFileData) {
+            return getCompareApi(secondFileData);
+        },
+        outputSettings: function (options) {
+            outputSettings(options);
+            return rootSelf;
+        }
+    };
+
+    return rootSelf;
+};
+
+function setGlobalOutputSettings(settings) {
+    globalOutputSettings = settings;
+    return resemble;
 }
 
-/**
- * Return data uri mime type.
- */
+function applyIgnore(api, ignore, customTolerance) {
+    switch (ignore) {
+        case "nothing":
+            api.ignoreNothing();
+            break;
+        case "less":
+            api.ignoreLess();
+            break;
+        case "antialiasing":
+            api.ignoreAntialiasing();
+            break;
+        case "colors":
+            api.ignoreColors();
+            break;
+        case "alpha":
+            api.ignoreAlpha();
+            break;
+        default:
+            throw new Error("Invalid ignore: " + ignore);
+    }
 
-function mime(uri) {
-    return uri.split(';')[0].slice(5);
+    api.setupCustomTolerance(customTolerance);
 }
+
+resemble.compare = function (image1, image2, options, cb) {
+    var callback;
+    var opt;
+
+    if (typeof options === "function") {
+        callback = options;
+        opt = {};
+    } else {
+        callback = cb;
+        opt = options || {};
+    }
+
+    var res = resemble(image1);
+    var compare;
+
+    if (opt.output) {
+        res.outputSettings(opt.output);
+    }
+
+    compare = res.compareTo(image2);
+
+    if (opt.returnEarlyThreshold) {
+        compare.setReturnEarlyThreshold(opt.returnEarlyThreshold);
+    }
+
+    if (opt.scaleToSameSize) {
+        compare.scaleToSameSize();
+    }
+
+    var toleranceSettings = opt.tolerance || {};
+    if (typeof opt.ignore === "string") {
+        applyIgnore(compare, opt.ignore, toleranceSettings);
+    } else if (opt.ignore && opt.ignore.forEach) {
+        opt.ignore.forEach(function (v) {
+            applyIgnore(compare, v, toleranceSettings);
+        });
+    }
+
+    compare.onComplete(function (data) {
+        if (data.error) {
+            callback(data.error);
+        } else {
+            callback(null, data);
+        }
+    });
+};
+
+var match;
+var delta;
 
 /**
  * Compare 2 passed in images
@@ -278,8 +1020,31 @@ function mime(uri) {
  * @returns {Promise<HTMLImageElement>} returns a buffer
  */
 async function comp(image1, image2) {
-    let delta = new Image(image1.width, image1.height);
-    pixelmatch(convert(image1), convert(image2), delta, image1.width, image1.height, {threshold: 0.1})
-    console.log("Difference detected!");
-    return delta;
+
+    resemble(image1).compareTo(image2).onComplete((data) => {
+        delta = data.getImageDataUrl();
+        match = data.misMatchPercentage;
+        /*
+        {
+          misMatchPercentage : 100, // %
+          isSameDimensions: true, // or false
+          getImageDataUrl: function(){}
+        }
+        */
+    })
 }
+
+chrome.runtime.onMessage.addListener(
+    function(request, sender, sendResponse) {
+        comp(request.image1, request.image2);
+        if (match > 10) {
+            console.log("Sending difference...");
+            sendResponse({diff: delta});
+            return true;
+        } else {
+            console.log("Diff not detected")
+            sendResponse({diff: "None"});
+
+        }
+    }
+);

@@ -1,7 +1,6 @@
 // Globals to avoid excessive async
 let urls = new Map();
 let urlID = ''
-//import resemble from "./resemble"
 
 /**
  * Create an initial tab and then a timer
@@ -67,7 +66,7 @@ function onCaptured(imageUri) {
                 files: ['contentScript.js']
             });
             console.log("Sending to: " + urlID)
-            chrome.tabs.sendMessage( urlID, {"image1": urls.get(urlID), "image2":imageUri});
+            chrome.tabs.sendMessage( urlID, {"image1": urls.get(urlID), "image2":imageUri}, read_response);
         } else {
             urls.set(urlID, imageUri);
         }
@@ -88,9 +87,28 @@ function onError(error) {
     }
 }
 
-chrome.runtime.onMessage.addListener(
-    function(request, sender, sendResponse) {
-        let diff = request.diff;
+function change_color(color) {
+    const canvas = new OffscreenCanvas(16, 16);
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, 16, 16);
+    context.fillStyle = color;  // Green
+    context.fillRect(0, 0, 16, 16);
+    const imageData = context.getImageData(0, 0, 16, 16);
+    chrome.action.setIcon({imageData: imageData}, () => { /* ... */ });
+}
+
+function read_response(request, sender, sendResponse) {
+    let diff;
+    try {
+        diff = request.diff;
+    } catch (e) {
+        diff = "None"
+    }
+    if (diff === "None") {
+        change_color("#00FF00")
+    } else {
+        change_color("#FF0000")
         chrome.tabs.create({ url: chrome.runtime.getURL("compare.html?data=" + diff) });
     }
-);
+    return true;
+}

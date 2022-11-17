@@ -3,16 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>Comparison</title>
+    <script src="page.js"></script>
 </head>
-<body>
-<script>
-    let sharedData;
-    try {
-        sharedData = new URLSearchParams(location.search).get('data');
-    } catch (e) {}
-    var img = document.createElement('img');
-    img.src = sharedData;
-    document.getElementById('body').appendChild(img);
-</script>
+<body id="body">
 </body>
 </html>

@@ -9,10 +9,8 @@
     "type": "module"
   },
   "action": {},
-  "permissions": ["tabs", "activeTab", "alarms", "scripting"],
+  "permissions": ["tabs", "activeTab", "alarms", "scripting", "action"],
   "host_permissions": [
-    "http://*/*",
-    "https://*/*",
     "<all_urls>"
   ],
   "content_scripts": [
