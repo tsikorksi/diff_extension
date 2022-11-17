@@ -37,7 +37,6 @@ function insert() {
     )
     cap.then(onCaptured, onError);
 
-    console.log("Screenshot: " + urlID)
 }
 
 /**
@@ -48,8 +47,8 @@ function getTab() {
 
         // since only one tab should be active and in the current window at once
         // the return variable should only have one entry
-        var activeTab = tabs[0];
-        urlID = activeTab.id; // or do whatever you need
+        urlID = tabs[0].id;
+
 
     });
 }
@@ -60,19 +59,18 @@ function getTab() {
  */
 function onCaptured(imageUri) {
     getTab()
-    if (urls.has(urlID)) {
-        chrome.scripting.executeScript({
-            target: { tabId: urlID },
-            files: ['contentScript.js']
-        });
-        console.log(urlID)
-        chrome.tabs.sendMessage( {
-                tabId: urlID,
-                message: {"image1": urls.get(urlID), "image2":imageUri}
-            }
-        );
-    } else {
-        urls.set(urlID, imageUri);
+    if (urlID > 5) {
+        console.log("Screenshot: " + urlID)
+        if (urls.has(urlID)) {
+            chrome.scripting.executeScript({
+                target: { tabId: urlID },
+                files: ['contentScript.js']
+            });
+            console.log("Sending to: " + urlID)
+            chrome.tabs.sendMessage( urlID, {"image1": urls.get(urlID), "image2":imageUri});
+        } else {
+            urls.set(urlID, imageUri);
+        }
     }
 }
 
@@ -89,3 +87,10 @@ function onError(error) {
         console.log(`Error: ${error}`);
     }
 }
+
+chrome.runtime.onMessage.addListener(
+    function(request, sender, sendResponse) {
+        let diff = request.diff;
+        chrome.tabs.create({ url: chrome.runtime.getURL("compare.html?data=" + diff) });
+    }
+);

@@ -1,26 +1,16 @@
-
-
-async function comp(image1, image2) {
-
-    //let delta = new Image(image1.width, image2.height);
-
-    let url = chrome.runtime.getURL("compare.html");
-    let tab = await chrome.tabs.create({url});
-    let delta = new Image(image1.width, image1.height);
-    let diff = pixelmatch(image1, image2, delta, image1.width, image1.height, {threshold: 0.1})
-    console.log("difference detected");
+// PIXELMATCH
+let defaultOptions;
+if (typeof defaultOptions === 'undefined') {
+    defaultOptions = {
+        threshold: 0.1,         // matching threshold (0 to 1); smaller is more sensitive
+        includeAA: false,       // whether to skip anti-aliasing detection
+        alpha: 0.1,             // opacity of original image in diff output
+        aaColor: [255, 255, 0], // color of anti-aliased pixels in diff output
+        diffColor: [255, 0, 0], // color of different pixels in diff output
+        diffColorAlt: null,     // whether to detect dark on light differences between img1 and img2 and set an alternative color to differentiate between the two
+        diffMask: false         // draw the diff over a transparent background (a mask)
+    };
 }
-
-
-const defaultOptions = {
-    threshold: 0.1,         // matching threshold (0 to 1); smaller is more sensitive
-    includeAA: false,       // whether to skip anti-aliasing detection
-    alpha: 0.1,             // opacity of original image in diff output
-    aaColor: [255, 255, 0], // color of anti-aliased pixels in diff output
-    diffColor: [255, 0, 0], // color of different pixels in diff output
-    diffColorAlt: null,     // whether to detect dark on light differences between img1 and img2 and set an alternative color to differentiate between the two
-    diffMask: false         // draw the diff over a transparent background (a mask)
-};
 
 function pixelmatch(img1, img2, output, width, height, options) {
 
@@ -247,6 +237,49 @@ function drawGrayPixel(img, i, alpha, output) {
 
 chrome.runtime.onMessage.addListener(
     function(request, sender, sendResponse) {
-        comp(request.image1, request.image2);
+        console.log("Calculating difference...");
+        let diff = comp(request.image1, request.image2);
+        sendResponse({diff: diff});
+
     }
 );
+
+/**
+ * Taken from https://github.com/component/data-uri-to-u8/blob/master/index.js
+ * @param uri the dataURL
+ * @returns {Uint8Array} usable by pixelmatch
+ */
+function convert(uri){
+    var data = uri.split(',')[1];
+    var bytes = atob(data);
+    var buf = new ArrayBuffer(bytes.length);
+    var arr = new Uint8Array(buf);
+
+    for (var i = 0; i < bytes.length; i++) {
+        arr[i] = bytes.charCodeAt(i);
+    }
+
+    arr.type = mime(uri);
+    return arr;
+}
+
+/**
+ * Return data uri mime type.
+ */
+
+function mime(uri) {
+    return uri.split(';')[0].slice(5);
+}
+
+/**
+ * Compare 2 passed in images
+ * @param image1 the first image in DataURL
+ * @param image2 the second image in DataURL
+ * @returns {Promise<HTMLImageElement>} returns a buffer
+ */
+async function comp(image1, image2) {
+    let delta = new Image(image1.width, image1.height);
+    pixelmatch(convert(image1), convert(image2), delta, image1.width, image1.height, {threshold: 0.1})
+    console.log("Difference detected!");
+    return delta;
+}
