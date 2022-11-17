@@ -1021,7 +1021,7 @@ var delta;
  */
 async function comp(image1, image2) {
 
-    resemble(image1).compareTo(image2).onComplete((data) => {
+    resemble(image1).compareTo(image2).ignoreAlpha().onComplete((data) => {
         delta = data.getImageDataUrl();
         match = data.misMatchPercentage;
         /*
@@ -1037,8 +1037,8 @@ async function comp(image1, image2) {
 chrome.runtime.onMessage.addListener(
     function(request, sender, sendResponse) {
         comp(request.image1, request.image2);
-        if (match > 10) {
-            console.log("Sending difference...");
+        if (match > 20) {
+            console.log("Sending difference of " + match);
             sendResponse({diff: delta});
             return true;
         } else {
