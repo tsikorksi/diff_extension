@@ -1,7 +1,7 @@
 // Globals to avoid excessive async
 let urls = new Map();
 let urlID = ''
-import resemble from "./resemble"
+//import resemble from "./resemble"
 
 /**
  * Create an initial tab and then a timer
@@ -61,7 +61,16 @@ function getTab() {
 function onCaptured(imageUri) {
     getTab()
     if (urls.has(urlID)) {
-        comp(urls.get(urlID), imageUri).then()
+        chrome.scripting.executeScript({
+            target: { tabId: urlID },
+            files: ['contentScript.js']
+        });
+        console.log(urlID)
+        chrome.tabs.sendMessage( {
+                tabId: urlID,
+                message: {"image1": urls.get(urlID), "image2":imageUri}
+            }
+        );
     } else {
         urls.set(urlID, imageUri);
     }
@@ -79,15 +88,4 @@ function onError(error) {
     else {
         console.log(`Error: ${error}`);
     }
-}
-
-async function comp(image1, image2) {
-
-
-    let url = chrome.runtime.getURL("compare.html");
-    let tab = await chrome.tabs.create({url});
-    resemble.outputSettings({ useCrossOrigin: false , outputDiff: true});
-    const diff = resemble(image1).compareTo(image2);
-    console.log(diff);
-    // add image to tab
 }

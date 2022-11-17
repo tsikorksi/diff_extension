@@ -9,7 +9,7 @@
     "type": "module"
   },
   "action": {},
-  "permissions": ["tabs", "activeTab", "alarms"],
+  "permissions": ["tabs", "activeTab", "alarms", "scripting"],
   "host_permissions": [
     "http://*/*",
     "https://*/*",
