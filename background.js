@@ -6,7 +6,7 @@ let urlID = ''
  * Create an initial tab and then a timer
  */
 chrome.runtime.onInstalled.addListener(async () => {
-    chrome.alarms.create({ delayInMinutes: 1 });
+    chrome.alarms.create({ delayInMinutes: 0.1 });
 });
 
 /**
@@ -14,10 +14,10 @@ chrome.runtime.onInstalled.addListener(async () => {
  */
 chrome.alarms.onAlarm.addListener( ()=>{
     timer();
-    chrome.alarms.create({ delayInMinutes: 1 });
+    chrome.alarms.create({ delayInMinutes: 0.1 });
 });
 
-chrome.tabs.onActivated.addListener (timer);
+ //chrome.tabs.onActivated.addListener (timer);
 
 /**
  * Run the screenshot function with a short delay for promise
@@ -32,9 +32,14 @@ function timer(){
  * screenshot and then log it
  */
 function insert() {
-    let cap = chrome.tabs.captureVisibleTab(
-    )
-    cap.then(onCaptured, onError);
+    chrome.tabs.getCurrent ( (tab) => {
+        if (tab.url.startsWith("http") ) {
+            let cap = chrome.tabs.captureVisibleTab(
+            )
+            cap.then(onCaptured, onError);
+        }
+    });
+
 
 }
 
@@ -46,9 +51,9 @@ function getTab() {
 
         // since only one tab should be active and in the current window at once
         // the return variable should only have one entry
-        urlID = tabs[0].id;
-
-
+        if (tab.url.startsWith("http") ) {
+            urlID = tabs[0].id;
+        }
     });
 }
 
@@ -65,7 +70,6 @@ function onCaptured(imageUri) {
                 target: { tabId: urlID },
                 files: ['contentScript.js']
             });
-            console.log("Sending to: " + urlID)
             chrome.tabs.sendMessage( urlID, {"image1": urls.get(urlID), "image2":imageUri}, read_response);
         } else {
             urls.set(urlID, imageUri);
@@ -108,7 +112,7 @@ function read_response(request, sender, sendResponse) {
         change_color("#00FF00")
     } else {
         change_color("#FF0000")
-        chrome.tabs.create({ url: chrome.runtime.getURL("compare.html?data=" + diff) });
+        chrome.tabs.create({ url: chrome.runtime.getURL("compare.html?data=" + encodeURI(diff)) });
     }
     return true;
 }
